@@ -1,0 +1,54 @@
+### Gradle ###
+.gradle/
+**/build/
+!gradle/wrapper/gradle-wrapper.jar
+
+### Local configuration ###
+local.properties
+*.local
+.env
+.env.*
+!.env.example
+
+### IntelliJ IDEA / Android Studio ###
+.idea/
+*.iws
+*.iml
+*.ipr
+out/
+.run/
+
+### Eclipse ###
+.apt_generated/
+.classpath
+.eclipse/
+.factorypath
+.project
+.settings/
+.springBeans
+.sts4-cache/
+bin/
+
+### VS Code ###
+.vscode/
+
+### Minecraft / NeoForge generated files ###
+run/
+repo/
+src/generated/
+
+### Logs and temporary files ###
+*.log
+*.tmp
+*.swp
+
+### Signing keys and certificates ###
+*.jks
+*.keystore
+*.p12
+*.pem
+
+### OS metadata ###
+.DS_Store
+Thumbs.db
+Desktop.ini

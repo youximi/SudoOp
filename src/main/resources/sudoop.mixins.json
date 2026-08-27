@@ -1,0 +1,15 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "cn.youximi.sudoop.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "StoredUserEntryAccessor",
+    "ServerGamePacketListenerImplMixin",
+    "OpCommandMixin",
+    "DeOpCommandsMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
