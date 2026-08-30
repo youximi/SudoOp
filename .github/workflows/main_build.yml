@@ -1,0 +1,367 @@
+name: Build and publish pre-release
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: prerelease-${{ github.repository }}
+  cancel-in-progress: false
+  queue: max
+
+env:
+  BASE_VERSION: '1.0.0'
+
+jobs:
+  build-and-release:
+    name: Build and publish pre-release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+
+      - name: Determine next patch version
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          candidate_file="$(mktemp)"
+          trap 'rm -f "$candidate_file"' EXIT
+
+          {
+            gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+              --jq '.[] | select(.draft == false) | .tag_name'
+            git for-each-ref --sort=-creatordate \
+              --format='%(refname:strip=2)' refs/tags
+          } | awk 'NF && !seen[$0]++' > "$candidate_file"
+
+          base_pattern='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          candidate_pattern='^(v?)(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-([0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*))?(\+([0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*))?$'
+
+          if [[ ! "$BASE_VERSION" =~ $base_pattern ]]; then
+            printf 'Invalid base version: %s\n' "$BASE_VERSION" >&2
+            exit 1
+          fi
+
+          version_is_greater() {
+            local left_major="$1"
+            local left_minor="$2"
+            local left_patch="$3"
+            local right_major="$4"
+            local right_minor="$5"
+            local right_patch="$6"
+
+            ((
+              left_major > right_major ||
+              (left_major == right_major && left_minor > right_minor) ||
+              (left_major == right_major && left_minor == right_minor && left_patch > right_patch)
+            ))
+          }
+
+          highest_major=$((10#${BASH_REMATCH[1]}))
+          highest_minor=$((10#${BASH_REMATCH[2]}))
+          highest_patch=$((10#${BASH_REMATCH[3]}))
+          style_major=-1
+          style_minor=-1
+          style_patch=-1
+          tag_prefix=''
+          has_tag_style=false
+
+          while IFS= read -r candidate; do
+            candidate="${candidate//$'\r'/}"
+            [[ -n "$candidate" ]] || continue
+            [[ "$candidate" =~ $candidate_pattern ]] || continue
+
+            candidate_prefix="${BASH_REMATCH[1]}"
+            candidate_major=$((10#${BASH_REMATCH[2]}))
+            candidate_minor=$((10#${BASH_REMATCH[3]}))
+            candidate_patch=$((10#${BASH_REMATCH[4]}))
+            candidate_prerelease="${BASH_REMATCH[6]:-}"
+
+            if [[ -n "$candidate_prerelease" ]]; then
+              IFS='.' read -r -a prerelease_identifiers \
+                <<< "$candidate_prerelease"
+              candidate_is_valid=true
+              for identifier in "${prerelease_identifiers[@]}"; do
+                if [[ "$identifier" =~ ^0[0-9]+$ ]]; then
+                  candidate_is_valid=false
+                  break
+                fi
+              done
+              [[ "$candidate_is_valid" == true ]] || continue
+            fi
+
+            if version_is_greater \
+              "$candidate_major" "$candidate_minor" "$candidate_patch" \
+              "$highest_major" "$highest_minor" "$highest_patch"; then
+              highest_major="$candidate_major"
+              highest_minor="$candidate_minor"
+              highest_patch="$candidate_patch"
+            fi
+
+            if [[ "$has_tag_style" == false ]] || version_is_greater \
+              "$candidate_major" "$candidate_minor" "$candidate_patch" \
+              "$style_major" "$style_minor" "$style_patch"; then
+              style_major="$candidate_major"
+              style_minor="$candidate_minor"
+              style_patch="$candidate_patch"
+              tag_prefix="$candidate_prefix"
+              has_tag_style=true
+            fi
+          done < "$candidate_file"
+
+          next_version="${highest_major}.${highest_minor}.$((highest_patch + 1))"
+          printf 'version=%s\n' "$next_version" | tee -a "$GITHUB_OUTPUT"
+          printf 'tag=%s%s\n' "$tag_prefix" "$next_version" \
+            | tee -a "$GITHUB_OUTPUT"
+
+      - name: Generate release notes
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p .release
+          commit_file=".release/commit-shas.txt"
+          temporary_file=".release/commit-shas.tmp"
+          : > "$commit_file"
+
+          if [[ "$GITHUB_EVENT_NAME" == 'push' ]]; then
+            if [[ "$PUSH_BEFORE" =~ ^[0-9a-fA-F]{40}$ ]] && \
+              [[ ! "$PUSH_BEFORE" =~ ^0{40}$ ]]; then
+              if git cat-file -e "${PUSH_BEFORE}^{commit}" 2>/dev/null; then
+                git rev-list --reverse "${PUSH_BEFORE}..${GITHUB_SHA}" \
+                  > "$commit_file"
+              else
+                gh api --paginate \
+                  "repos/${GITHUB_REPOSITORY}/compare/${PUSH_BEFORE}...${GITHUB_SHA}?per_page=100" \
+                  --jq '.commits[].sha' > "$commit_file"
+              fi
+            else
+              git rev-list --reverse "$GITHUB_SHA" > "$commit_file"
+            fi
+          else
+            printf '%s\n' "$GITHUB_SHA" > "$commit_file"
+          fi
+
+          if [[ ! -s "$commit_file" ]]; then
+            printf '%s\n' "$GITHUB_SHA" > "$commit_file"
+          fi
+
+          awk 'NF && !seen[$0]++' "$commit_file" > "$temporary_file"
+          mv "$temporary_file" "$commit_file"
+
+          while IFS= read -r commit; do
+            if ! git cat-file -e "${commit}^{commit}" 2>/dev/null; then
+              printf 'Commit is unavailable locally: %s\n' "$commit" >&2
+              exit 1
+            fi
+            if ! git merge-base --is-ancestor "$commit" "$GITHUB_SHA"; then
+              printf 'Commit is outside the build revision: %s\n' "$commit" >&2
+              exit 1
+            fi
+          done < "$commit_file"
+
+          source_short_sha="$(git rev-parse --short=7 "$GITHUB_SHA")"
+          jar_name="sudoop-${VERSION}.jar"
+          checksum_name="${jar_name}.sha256"
+
+          {
+            printf '## Build\n\n'
+            printf -- '- Version: `%s`\n' "$VERSION"
+            printf -- '- Tag: `%s`\n' "$RELEASE_TAG"
+            printf -- '- Source: [`%s`](%s/%s/commit/%s)\n' \
+              "$source_short_sha" "$GITHUB_SERVER_URL" \
+              "$GITHUB_REPOSITORY" "$GITHUB_SHA"
+            printf -- '- Trigger: `%s`\n' "$GITHUB_EVENT_NAME"
+            printf -- '- Workflow run: [#%s](%s/%s/actions/runs/%s)\n\n' \
+              "$GITHUB_RUN_NUMBER" "$GITHUB_SERVER_URL" \
+              "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"
+            printf '## Commits\n\n'
+
+            while IFS= read -r commit; do
+              short_sha="$(git rev-parse --short=7 "$commit")"
+              subject="$(git show -s --format=%s "$commit")"
+              subject="${subject//$'\r'/}"
+              printf -- '- [`%s`](%s/%s/commit/%s) %s\n' \
+                "$short_sha" "$GITHUB_SERVER_URL" \
+                "$GITHUB_REPOSITORY" "$commit" "$subject"
+            done < "$commit_file"
+
+            printf '\n## Assets\n\n'
+            printf -- '- `%s`\n' "$jar_name"
+            printf -- '- `%s`\n' "$checksum_name"
+          } > .release/release-notes.md
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-provider: basic
+          validate-wrappers: true
+
+      - name: Build release JAR
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon --stacktrace clean build \
+            -Pmod_version="$VERSION"
+
+      - name: Validate and package assets
+        id: package
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          jar_name="sudoop-${VERSION}.jar"
+          checksum_name="${jar_name}.sha256"
+          source_jar="build/libs/${jar_name}"
+
+          if [[ ! -s "$source_jar" ]]; then
+            printf 'Expected release artifact is missing or empty: %s\n' \
+              "$source_jar" >&2
+            exit 1
+          fi
+
+          jar tf "$source_jar" > /dev/null
+          metadata="$(unzip -p "$source_jar" META-INF/neoforge.mods.toml)"
+          if ! grep -Fq "version=\"${VERSION}\"" <<< "$metadata"; then
+            printf 'Artifact metadata does not contain version %s\n' \
+              "$VERSION" >&2
+            exit 1
+          fi
+
+          mkdir -p dist
+          install -m 0644 "$source_jar" "dist/${jar_name}"
+          (
+            cd dist
+            sha256sum "$jar_name" > "$checksum_name"
+            sha256sum --check "$checksum_name"
+          )
+
+          printf 'jar_name=%s\n' "$jar_name" >> "$GITHUB_OUTPUT"
+          printf 'checksum_name=%s\n' "$checksum_name" >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          JAR_NAME: ${{ steps.package.outputs.jar_name }}
+          CHECKSUM_NAME: ${{ steps.package.outputs.checksum_name }}
+        run: |
+          set -euo pipefail
+
+          if gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" \
+            > /dev/null 2>&1; then
+            printf 'Release already exists: %s\n' "$RELEASE_TAG" >&2
+            exit 1
+          fi
+
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" \
+            > /dev/null 2>&1; then
+            printf 'Tag already exists: %s\n' "$RELEASE_TAG" >&2
+            exit 1
+          fi
+
+          gh release create "$RELEASE_TAG" \
+            "dist/${JAR_NAME}#NeoForge server mod" \
+            "dist/${CHECKSUM_NAME}#SHA-256 checksum" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "$VERSION" \
+            --notes-file .release/release-notes.md \
+            --prerelease \
+            --latest=false
+
+      - name: Verify published pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          JAR_NAME: ${{ steps.package.outputs.jar_name }}
+          CHECKSUM_NAME: ${{ steps.package.outputs.checksum_name }}
+        run: |
+          set -euo pipefail
+
+          release_json="$(
+            gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}"
+          )"
+
+          jq -e \
+            --arg version "$VERSION" \
+            --arg tag "$RELEASE_TAG" \
+            --arg jar "$JAR_NAME" \
+            --arg checksum "$CHECKSUM_NAME" \
+            '
+              .name == $version and
+              .tag_name == $tag and
+              .draft == false and
+              .prerelease == true and
+              ([.assets[] | select(.name == $jar and .size > 0)] | length == 1) and
+              ([.assets[] | select(.name == $checksum and .size > 0)] | length == 1)
+            ' <<< "$release_json" > /dev/null
+
+          resolved_commit="$(
+            gh api "repos/${GITHUB_REPOSITORY}/commits/${RELEASE_TAG}" \
+              --jq '.sha'
+          )"
+          if [[ "$resolved_commit" != "$GITHUB_SHA" ]]; then
+            printf 'Release tag resolves to %s instead of %s\n' \
+              "$resolved_commit" "$GITHUB_SHA" >&2
+            exit 1
+          fi
+
+          release_body="$(jq -r '.body // ""' <<< "$release_json")"
+          while IFS= read -r commit; do
+            short_sha="$(git rev-parse --short=7 "$commit")"
+            subject="$(git show -s --format=%s "$commit")"
+            subject="${subject//$'\r'/}"
+
+            if ! grep -Fq -- "$short_sha" <<< "$release_body"; then
+              printf 'Release notes are missing commit %s\n' \
+                "$short_sha" >&2
+              exit 1
+            fi
+            if ! grep -Fq -- "$subject" <<< "$release_body"; then
+              printf 'Release notes are missing commit message: %s\n' \
+                "$subject" >&2
+              exit 1
+            fi
+          done < .release/commit-shas.txt
+
+          release_url="$(jq -r '.html_url' <<< "$release_json")"
+          {
+            printf '### Published pre-release `%s`\n\n' "$VERSION"
+            printf -- '- Tag: `%s`\n' "$RELEASE_TAG"
+            printf -- '- JAR: `%s`\n' "$JAR_NAME"
+            printf -- '- Checksum: `%s`\n' "$CHECKSUM_NAME"
+            printf -- '- Release: %s\n' "$release_url"
+          } >> "$GITHUB_STEP_SUMMARY"
