@@ -93,7 +93,7 @@ public final class TemporaryOpManager {
             if (now >= record.expiresAt()) {
                 expireRecord(server, record);
             } else if (!hasRuntimeOwnership(server, record)) {
-                skipRecord(server, record, "OP 状态已变化，无法确认当前权限仍属于本模组，未自动撤销。");
+                skipRecord(record, "OP 状态已变化，无法确认当前权限仍属于本模组，未自动撤销。");
             } else if (tickCounter % 20 == 0) {
                 updateActionBar(server, record, false, now);
             }
@@ -108,11 +108,11 @@ public final class TemporaryOpManager {
         for (TemporaryOpRecord record : List.copyOf(records.values())) {
             ServerOpListEntry current = server.getPlayerList().getOps().get(record.profile());
             if (!hasRuntimeOwnership(server, record)) {
-                skipRecord(server, record, "服务器停止时 OP 状态已变化，未强行撤销。");
+                skipRecord(record, "服务器停止时 OP 状态已变化，未强行撤销。");
                 continue;
             }
             if (hasNonListOperatorStatus(server, record.profile())) {
-                skipRecord(server, record, "服务器停止时检测到原生或后台权限来源，未改动当前权限。");
+                skipRecord(record, "服务器停止时检测到原生或后台权限来源，未改动当前权限。");
                 continue;
             }
 
@@ -121,7 +121,7 @@ public final class TemporaryOpManager {
                 clearActionBar(record.playerId());
                 auditLog.appendRecord("SERVER_STOP_CLEANUP", record, "REVOKED", "服务器停止前清理成功");
             } else {
-                skipRecord(server, record, "服务器停止时无法确认或撤销 OP 条目，已停止追踪。");
+                skipRecord(record, "服务器停止时无法确认或撤销 OP 条目，已停止追踪。");
             }
         }
         persistActiveState();
@@ -139,12 +139,13 @@ public final class TemporaryOpManager {
     }
 
     public void onPlayerLoggedIn(ServerPlayer player) {
-        if (!isTemporaryOp(player)) {
+        MinecraftServer server = player.getServer();
+        if (server == null || !isTemporaryOp(player)) {
             return;
         }
         TemporaryOpRecord record = records.get(player.getUUID());
         if (record != null) {
-            updateActionBar(player.getServer(), record, true, System.currentTimeMillis());
+            updateActionBar(server, record, true, System.currentTimeMillis());
         }
     }
 
@@ -159,7 +160,7 @@ public final class TemporaryOpManager {
 
         TemporaryOpRecord record = records.get(player.getUUID());
         if (record != null) {
-            skipRecord(player.getServer(), record,
+            skipRecord(record,
                     "检测到 OP 权限变化（等级 " + oldLevel + " -> " + newLevel + "），停止追踪且不改动当前权限。");
         }
     }
@@ -167,7 +168,8 @@ public final class TemporaryOpManager {
     public void onCommand(CommandEvent event) {
         ParseResults<CommandSourceStack> parseResults = event.getParseResults();
         ServerPlayer player = parseResults.getContext().getSource().getPlayer();
-        if (player == null || !isTemporaryOp(player)) {
+        MinecraftServer server = player == null ? null : player.getServer();
+        if (player == null || server == null || !isTemporaryOp(player)) {
             return;
         }
 
@@ -192,7 +194,7 @@ public final class TemporaryOpManager {
             }
             Collection<GameProfile> targets = GameProfileArgument.getGameProfiles(context, "targets");
             for (GameProfile target : targets) {
-                if (isProtectedBackendOp(player.getServer(), target)) {
+                if (isProtectedBackendOp(server, target)) {
                     event.setCanceled(true);
                     parseResults.getContext().getSource().sendFailure(
                             SudoOpMessages.forPlayer(player, "message.sudoop.protected_operation"));
@@ -216,11 +218,12 @@ public final class TemporaryOpManager {
 
     public boolean shouldBlockOpManagement(CommandSourceStack source, Collection<GameProfile> targets) {
         ServerPlayer player = source.getPlayer();
-        if (player == null || !isTemporaryOp(player)) {
+        MinecraftServer server = player == null ? null : player.getServer();
+        if (player == null || server == null || !isTemporaryOp(player)) {
             return false;
         }
         for (GameProfile target : targets) {
-            if (isProtectedBackendOp(player.getServer(), target)) {
+            if (isProtectedBackendOp(server, target)) {
                 return true;
             }
         }
@@ -229,7 +232,7 @@ public final class TemporaryOpManager {
 
     public int request(ServerPlayer player, String suppliedPassword) {
         MinecraftServer server = player.getServer();
-        if (this.server != server || auditLog == null) {
+        if (server == null || this.server != server || auditLog == null) {
             player.sendSystemMessage(SudoOpMessages.forPlayer(player, "message.sudoop.service_not_ready"));
             return 0;
         }
@@ -238,7 +241,7 @@ public final class TemporaryOpManager {
         TemporaryOpRecord currentRecord = records.get(player.getUUID());
         if (currentRecord != null) {
             if (!hasRuntimeOwnership(server, currentRecord)) {
-                skipRecord(server, currentRecord, "申请时发现 OP 状态已变化，停止追踪旧记录。");
+                skipRecord(currentRecord, "申请时发现 OP 状态已变化，停止追踪旧记录。");
             } else if (now < currentRecord.expiresAt()) {
                 int minutes = remainingMinutes(currentRecord.expiresAt(), now);
                 auditLog.appendRequest("REJECT_ALREADY_TEMPORARY", player.getUUID(), player.getGameProfile().getName(),
@@ -350,29 +353,32 @@ public final class TemporaryOpManager {
         return 1;
     }
 
+    @SuppressWarnings("BooleanMethodIsAlwaysInverted")
     public boolean isTemporaryOp(ServerPlayer player) {
+        MinecraftServer server = player.getServer();
         TemporaryOpRecord record = records.get(player.getUUID());
-        if (record == null || this.server != player.getServer()) {
+        if (server == null || record == null || this.server != server) {
             return false;
         }
         if (System.currentTimeMillis() >= record.expiresAt()) {
-            expireRecord(player.getServer(), record);
+            expireRecord(server, record);
             return false;
         }
-        if (!hasRuntimeOwnership(player.getServer(), record)) {
-            skipRecord(player.getServer(), record, "查询临时 OP 状态时发现权限归属变化，停止追踪。");
+        if (!hasRuntimeOwnership(server, record)) {
+            skipRecord(record, "查询临时 OP 状态时发现权限归属变化，停止追踪。");
             return false;
         }
         return true;
     }
 
     public Suggestions filterCommandSuggestions(ServerPlayer player, String input, Suggestions suggestions) {
-        if (!isTemporaryOp(player)) {
+        MinecraftServer server = player.getServer();
+        if (server == null || !isTemporaryOp(player)) {
             return suggestions;
         }
 
         if (containsCommandToken(input, "deop")) {
-            Set<String> visibleNames = visibleTemporaryNames(player.getServer());
+            Set<String> visibleNames = visibleTemporaryNames(server);
             List<Suggestion> filtered = suggestions.getList().stream()
                     .filter(suggestion -> containsIgnoreCase(visibleNames, suggestion.getText()))
                     .toList();
@@ -380,7 +386,7 @@ public final class TemporaryOpManager {
         }
         if (containsCommandToken(input, "op")) {
             List<Suggestion> filtered = suggestions.getList().stream()
-                    .filter(suggestion -> !isProtectedBackendOpName(player.getServer(), suggestion.getText()))
+                    .filter(suggestion -> !isProtectedBackendOpName(server, suggestion.getText()))
                     .toList();
             return new Suggestions(suggestions.getRange(), filtered);
         }
@@ -433,11 +439,11 @@ public final class TemporaryOpManager {
     private void expireRecord(MinecraftServer server, TemporaryOpRecord record) {
         ServerOpListEntry current = server.getPlayerList().getOps().get(record.profile());
         if (!hasRuntimeOwnership(server, record)) {
-            skipRecord(server, record, "到期时 OP 条目已变化或无法确认归属，未自动撤销。");
+            skipRecord(record, "到期时 OP 条目已变化或无法确认归属，未自动撤销。");
             return;
         }
         if (hasNonListOperatorStatus(server, record.profile())) {
-            skipRecord(server, record, "到期时检测到原生或后台权限来源，未改动当前权限。");
+            skipRecord(record, "到期时检测到原生或后台权限来源，未改动当前权限。");
             return;
         }
 
@@ -448,11 +454,11 @@ public final class TemporaryOpManager {
             auditLog.appendRecord("EXPIRE_REVOKED", record, "REVOKED", "临时 OP 到期且撤销成功");
             broadcastExpire(server, record);
         } else {
-            skipRecord(server, record, "到期后撤销未完成，已停止追踪且未继续修改权限。");
+            skipRecord(record, "到期后撤销未完成，已停止追踪且未继续修改权限。");
         }
     }
 
-    private void skipRecord(MinecraftServer server, TemporaryOpRecord record, String reason) {
+    private void skipRecord(TemporaryOpRecord record, String reason) {
         if (!records.remove(record.playerId(), record)) {
             return;
         }
@@ -501,8 +507,8 @@ public final class TemporaryOpManager {
 
     private boolean isProtectedBackendOpName(MinecraftServer server, String name) {
         for (ServerOpListEntry entry : server.getPlayerList().getOps().getEntries()) {
-            GameProfile profile = ((StoredUserEntryAccessor<GameProfile>)entry).sudoop$getUser();
-            if (profile != null && profile.getName().equalsIgnoreCase(name)) {
+            Object user = ((StoredUserEntryAccessor<?>)entry).sudoop$getUser();
+            if (user instanceof GameProfile profile && profile.getName().equalsIgnoreCase(name)) {
                 TemporaryOpRecord record = records.get(profile.getId());
                 return record == null || !hasRuntimeOwnership(server, record);
             }

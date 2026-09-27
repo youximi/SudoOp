@@ -57,10 +57,6 @@ public final class SudoOpConfig {
             SudoOp.LOGGER.error("读取配置 commandName 失败，使用安全默认值 sudo。", exception);
             return "sudo";
         }
-        if (value == null) {
-            SudoOp.LOGGER.error("配置 commandName 读取结果为空，使用安全默认值 sudo。");
-            return "sudo";
-        }
         if (COMMAND_NAME_PATTERN.matcher(value).matches()) {
             return value;
         }
@@ -79,7 +75,7 @@ public final class SudoOpConfig {
     }
 
     public static String password() {
-        return safeSecret("password", PASSWORD, "");
+        return safe("password", PASSWORD, "");
     }
 
     public static boolean broadcastEnabled() {
@@ -106,16 +102,6 @@ public final class SudoOpConfig {
                 throw new IllegalStateException("null value");
             }
             return value;
-        } catch (Exception exception) {
-            SudoOp.LOGGER.error("读取配置 {} 失败，使用安全默认值。", key, exception);
-            return fallback;
-        }
-    }
-
-    private static String safeSecret(String key, Supplier<String> supplier, String fallback) {
-        try {
-            String value = supplier.get();
-            return value == null ? fallback : value;
         } catch (Exception exception) {
             SudoOp.LOGGER.error("读取配置 {} 失败，使用安全默认值。", key, exception);
             return fallback;

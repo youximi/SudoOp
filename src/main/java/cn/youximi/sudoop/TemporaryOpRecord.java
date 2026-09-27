@@ -88,8 +88,8 @@ public final class TemporaryOpRecord {
     }
 
     public boolean matches(ServerOpListEntry entry) {
-        GameProfile profile = entry == null ? null : ((StoredUserEntryAccessor<GameProfile>)entry).sudoop$getUser();
-        if (profile == null) {
+        Object user = entry == null ? null : ((StoredUserEntryAccessor<?>)entry).sudoop$getUser();
+        if (!(user instanceof GameProfile profile)) {
             return false;
         }
         return playerId.equals(profile.getId())
