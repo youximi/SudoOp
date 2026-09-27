@@ -33,18 +33,6 @@ public final class SudoOpConfig {
             .comment("Show the remaining temporary OP time in the player's action bar.")
             .define("actionBarEnabled", true);
 
-    public static final ModConfigSpec.ConfigValue<String> GRANT_BROADCAST_MESSAGE = BUILDER
-            .comment("Grant broadcast. Supports & color codes and {player}.")
-            .define("grantBroadcastMessage", "&a{player} 获取了临时OP");
-
-    public static final ModConfigSpec.ConfigValue<String> EXPIRE_BROADCAST_MESSAGE = BUILDER
-            .comment("Expiration broadcast. Supports & color codes and {player}.")
-            .define("expireBroadcastMessage", "&e{player} 的临时OP已结束");
-
-    public static final ModConfigSpec.ConfigValue<String> ACTION_BAR_MESSAGE = BUILDER
-            .comment("Action bar message. Supports & color codes, {player} and {minutes}.")
-            .define("actionBarMessage", "&b当前已获取临时OP，还剩 {minutes} 分钟");
-
     public static final ModConfigSpec SPEC = BUILDER.build();
 
     private SudoOpConfig() {
@@ -69,10 +57,6 @@ public final class SudoOpConfig {
             SudoOp.LOGGER.error("读取配置 commandName 失败，使用安全默认值 sudo。", exception);
             return "sudo";
         }
-        if (value == null) {
-            SudoOp.LOGGER.error("配置 commandName 读取结果为空，使用安全默认值 sudo。");
-            return "sudo";
-        }
         if (COMMAND_NAME_PATTERN.matcher(value).matches()) {
             return value;
         }
@@ -91,7 +75,7 @@ public final class SudoOpConfig {
     }
 
     public static String password() {
-        return safeSecret("password", PASSWORD, "");
+        return safe("password", PASSWORD, "");
     }
 
     public static boolean broadcastEnabled() {
@@ -100,18 +84,6 @@ public final class SudoOpConfig {
 
     public static boolean actionBarEnabled() {
         return safe("actionBarEnabled", ACTION_BAR_ENABLED, true);
-    }
-
-    public static String grantBroadcastMessage() {
-        return safe("grantBroadcastMessage", GRANT_BROADCAST_MESSAGE, "&a{player} 获取了临时OP");
-    }
-
-    public static String expireBroadcastMessage() {
-        return safe("expireBroadcastMessage", EXPIRE_BROADCAST_MESSAGE, "&e{player} 的临时OP已结束");
-    }
-
-    public static String actionBarMessage() {
-        return safe("actionBarMessage", ACTION_BAR_MESSAGE, "&b当前已获取临时OP，还剩 {minutes} 分钟");
     }
 
     private static boolean isValidCommandName(Object value) {
@@ -130,16 +102,6 @@ public final class SudoOpConfig {
                 throw new IllegalStateException("null value");
             }
             return value;
-        } catch (Exception exception) {
-            SudoOp.LOGGER.error("读取配置 {} 失败，使用安全默认值。", key, exception);
-            return fallback;
-        }
-    }
-
-    private static String safeSecret(String key, Supplier<String> supplier, String fallback) {
-        try {
-            String value = supplier.get();
-            return value == null ? fallback : value;
         } catch (Exception exception) {
             SudoOp.LOGGER.error("读取配置 {} 失败，使用安全默认值。", key, exception);
             return fallback;

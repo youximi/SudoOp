@@ -1,0 +1,15 @@
+{
+  "message.sudoop.protected_operation": "该 OP 管理操作不可用。",
+  "message.sudoop.service_not_ready": "临时 OP 服务尚未准备好，请稍后再试。",
+  "message.sudoop.already_temporary": "你仍处于临时 OP 状态，还剩 %s 分钟。",
+  "message.sudoop.already_op": "你已经拥有 OP，不能获取临时 OP。",
+  "message.sudoop.password_not_required": "当前未设置密码，请直接使用 /%s。",
+  "message.sudoop.password_required": "当前需要密码，请使用 /%s <密码>。",
+  "message.sudoop.password_incorrect": "密码错误，未授予临时 OP。",
+  "message.sudoop.grant_failed": "临时 OP 申请失败，请联系管理员查看后台日志。",
+  "message.sudoop.grant_unconfirmed": "临时 OP 申请失败，当前权限状态无法安全确认。",
+  "message.sudoop.grant_success": "临时 OP 已生效，持续 %s 秒。",
+  "message.sudoop.grant_broadcast": "%s 获取了临时OP",
+  "message.sudoop.expire_broadcast": "%s 的临时OP已结束",
+  "message.sudoop.action_bar": "当前已获取临时OP，还剩 %s 分钟"
+}

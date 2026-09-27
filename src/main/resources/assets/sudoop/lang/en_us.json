@@ -1,0 +1,15 @@
+{
+  "message.sudoop.protected_operation": "This OP management operation is unavailable.",
+  "message.sudoop.service_not_ready": "The temporary OP service is not ready yet. Please try again shortly.",
+  "message.sudoop.already_temporary": "You still have temporary OP for %s more minutes.",
+  "message.sudoop.already_op": "You already have OP and cannot request temporary OP.",
+  "message.sudoop.password_not_required": "No password is set. Use /%s without a password.",
+  "message.sudoop.password_required": "A password is required. Use /%s <password>.",
+  "message.sudoop.password_incorrect": "Incorrect password. Temporary OP was not granted.",
+  "message.sudoop.grant_failed": "Temporary OP could not be granted. Ask an administrator to check the server logs.",
+  "message.sudoop.grant_unconfirmed": "Temporary OP could not be granted because the permission state could not be confirmed safely.",
+  "message.sudoop.grant_success": "Temporary OP is active for %s seconds.",
+  "message.sudoop.grant_broadcast": "%s received temporary OP",
+  "message.sudoop.expire_broadcast": "%s's temporary OP has ended",
+  "message.sudoop.action_bar": "Temporary OP active: %s minutes remaining"
+}
