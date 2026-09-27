@@ -27,8 +27,6 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.arguments.GameProfileArgument;
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.chat.MutableComponent;
-import net.minecraft.network.chat.Style;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.players.PlayerList;
@@ -181,7 +179,8 @@ public final class TemporaryOpManager {
             }
             if (command.equals("execute")) {
                 event.setCanceled(true);
-                parseResults.getContext().getSource().sendFailure(Component.literal("该 OP 管理操作不可用。"));
+                parseResults.getContext().getSource().sendFailure(
+                        SudoOpMessages.forPlayer(player, "message.sudoop.protected_operation"));
                 if (auditLog != null) {
                     auditLog.appendRequest("PROTECTED_OP_OPERATION_BLOCKED", player.getUUID(),
                             player.getGameProfile().getName(), "BLOCKED", "临时 OP 玩家尝试通过 execute 执行 OP 管理命令，已拦截");
@@ -195,7 +194,8 @@ public final class TemporaryOpManager {
             for (GameProfile target : targets) {
                 if (isProtectedBackendOp(player.getServer(), target)) {
                     event.setCanceled(true);
-                    parseResults.getContext().getSource().sendFailure(Component.literal("该 OP 管理操作不可用。"));
+                    parseResults.getContext().getSource().sendFailure(
+                            SudoOpMessages.forPlayer(player, "message.sudoop.protected_operation"));
                     if (auditLog != null) {
                         auditLog.appendRequest("PROTECTED_OP_OPERATION_BLOCKED", player.getUUID(), player.getGameProfile().getName(),
                                 "BLOCKED", "临时 OP 玩家尝试操作非模组 OP，已拦截");
@@ -230,7 +230,7 @@ public final class TemporaryOpManager {
     public int request(ServerPlayer player, String suppliedPassword) {
         MinecraftServer server = player.getServer();
         if (this.server != server || auditLog == null) {
-            player.sendSystemMessage(Component.literal("临时 OP 服务尚未准备好，请稍后再试。"));
+            player.sendSystemMessage(SudoOpMessages.forPlayer(player, "message.sudoop.service_not_ready"));
             return 0;
         }
 
@@ -243,7 +243,7 @@ public final class TemporaryOpManager {
                 int minutes = remainingMinutes(currentRecord.expiresAt(), now);
                 auditLog.appendRequest("REJECT_ALREADY_TEMPORARY", player.getUUID(), player.getGameProfile().getName(),
                         "REJECTED", "玩家仍处于临时 OP 状态");
-                player.sendSystemMessage(Component.literal("你仍处于临时 OP 状态，还剩 " + minutes + " 分钟。"));
+                player.sendSystemMessage(SudoOpMessages.forPlayer(player, "message.sudoop.already_temporary", minutes));
                 return 0;
             } else {
                 expireRecord(server, currentRecord);
@@ -255,7 +255,7 @@ public final class TemporaryOpManager {
         if (playerList.isOp(profile)) {
             auditLog.appendRequest("REJECT_ALREADY_OP", player.getUUID(), profile.getName(),
                     "REJECTED", "玩家已经拥有原生或后台 OP");
-            player.sendSystemMessage(Component.literal("你已经拥有 OP，不能获取临时 OP。"));
+            player.sendSystemMessage(SudoOpMessages.forPlayer(player, "message.sudoop.already_op"));
             return 0;
         }
 
@@ -264,18 +264,20 @@ public final class TemporaryOpManager {
             if (suppliedPassword != null && !suppliedPassword.isEmpty()) {
                 auditLog.appendRequest("REJECT_PASSWORD", player.getUUID(), profile.getName(),
                         "REJECTED", "当前未设置密码，不应提供密码参数");
-                player.sendSystemMessage(Component.literal("当前未设置密码，请直接使用 /" + SudoOpConfig.commandName() + "。"));
+                player.sendSystemMessage(SudoOpMessages.forPlayer(player, "message.sudoop.password_not_required",
+                        SudoOpConfig.commandName()));
                 return 0;
             }
         } else if (suppliedPassword == null || suppliedPassword.isEmpty()) {
             auditLog.appendRequest("REJECT_PASSWORD", player.getUUID(), profile.getName(),
                     "REJECTED", "未提供密码");
-            player.sendSystemMessage(Component.literal("当前需要密码，请使用 /" + SudoOpConfig.commandName() + " <密码>。"));
+            player.sendSystemMessage(SudoOpMessages.forPlayer(player, "message.sudoop.password_required",
+                    SudoOpConfig.commandName()));
             return 0;
         } else if (!constantTimeEquals(configuredPassword, suppliedPassword)) {
             auditLog.appendRequest("REJECT_PASSWORD", player.getUUID(), profile.getName(),
                     "REJECTED", "密码错误");
-            player.sendSystemMessage(Component.literal("密码错误，未授予临时 OP。"));
+            player.sendSystemMessage(SudoOpMessages.forPlayer(player, "message.sudoop.password_incorrect"));
             return 0;
         }
 
@@ -288,7 +290,7 @@ public final class TemporaryOpManager {
         records.put(record.playerId(), record);
         if (!persistActiveState()) {
             records.remove(record.playerId(), record);
-            player.sendSystemMessage(Component.literal("临时 OP 申请失败，请联系管理员查看后台日志。"));
+            player.sendSystemMessage(SudoOpMessages.forPlayer(player, "message.sudoop.grant_failed"));
             auditLog.appendRecord("GRANT_FAILED", record, "FAILED", "无法持久化临时 OP 状态，未执行授权");
             return 0;
         }
@@ -298,7 +300,7 @@ public final class TemporaryOpManager {
             persistActiveState();
             auditLog.appendRequest("REJECT_ALREADY_OP", player.getUUID(), profile.getName(),
                     "REJECTED", "授权前再次检测到原生或后台 OP，未覆盖现有权限");
-            player.sendSystemMessage(Component.literal("你已经拥有 OP，不能获取临时 OP。"));
+            player.sendSystemMessage(SudoOpMessages.forPlayer(player, "message.sudoop.already_op"));
             return 0;
         }
 
@@ -309,7 +311,7 @@ public final class TemporaryOpManager {
             persistActiveState();
             SudoOp.LOGGER.error("授予玩家 {} 临时 OP 时写入原生 OP 列表失败。", profile.getName(), exception);
             auditLog.appendRecord("GRANT_FAILED", record, "FAILED", "写入原生 OP 列表失败");
-            player.sendSystemMessage(Component.literal("临时 OP 申请失败，请联系管理员查看后台日志。"));
+            player.sendSystemMessage(SudoOpMessages.forPlayer(player, "message.sudoop.grant_failed"));
             return 0;
         }
 
@@ -318,7 +320,7 @@ public final class TemporaryOpManager {
             records.remove(record.playerId(), record);
             persistActiveState();
             auditLog.appendRecord("GRANT_FAILED", record, "SKIPPED", "授权后 OP 条目无法确认归属，未继续追踪");
-            player.sendSystemMessage(Component.literal("临时 OP 申请失败，当前权限状态无法安全确认。"));
+            player.sendSystemMessage(SudoOpMessages.forPlayer(player, "message.sudoop.grant_unconfirmed"));
             SudoOp.LOGGER.error("玩家 {} 授权后 OP 条目与预期不一致，未执行任何自动撤销。", profile.getName());
             return 0;
         }
@@ -342,7 +344,7 @@ public final class TemporaryOpManager {
         }
 
         auditLog.appendRecord("GRANT_SUCCESS", record, "GRANTED", "临时 OP 授予成功");
-        player.sendSystemMessage(Component.literal("临时 OP 已生效，持续 " + durationSeconds + " 秒。"));
+        player.sendSystemMessage(SudoOpMessages.forPlayer(player, "message.sudoop.grant_success", durationSeconds));
         broadcastGrant(server, record);
         updateActionBar(server, record, true, now);
         return 1;
@@ -533,7 +535,8 @@ public final class TemporaryOpManager {
         if (!force && now - record.lastActionBarSentAt() < 1000L && minutes == record.lastActionBarMinutes()) {
             return;
         }
-        player.displayClientMessage(render(SudoOpConfig.actionBarMessage(), record.playerName(), minutes), true);
+        player.displayClientMessage(SudoOpMessages.forPlayer(player, "message.sudoop.action_bar", minutes)
+                .withStyle(ChatFormatting.AQUA), true);
         record.setLastActionBarSentAt(now);
         record.setLastActionBarMinutes(minutes);
         actionBarVisible.add(record.playerId());
@@ -551,16 +554,23 @@ public final class TemporaryOpManager {
 
     private void broadcastGrant(MinecraftServer server, TemporaryOpRecord record) {
         if (SudoOpConfig.broadcastEnabled()) {
-            server.getPlayerList().broadcastSystemMessage(
-                    render(SudoOpConfig.grantBroadcastMessage(), record.playerName(),
-                            remainingMinutes(record.expiresAt(), record.grantedAt())), false);
+            for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+                player.sendSystemMessage(SudoOpMessages.forPlayer(player, "message.sudoop.grant_broadcast",
+                        record.playerName()).withStyle(ChatFormatting.GREEN));
+            }
+            server.sendSystemMessage(SudoOpMessages.forPlayer(null, "message.sudoop.grant_broadcast",
+                    record.playerName()).withStyle(ChatFormatting.GREEN));
         }
     }
 
     private void broadcastExpire(MinecraftServer server, TemporaryOpRecord record) {
         if (SudoOpConfig.broadcastEnabled()) {
-            server.getPlayerList().broadcastSystemMessage(
-                    render(SudoOpConfig.expireBroadcastMessage(), record.playerName(), 0), false);
+            for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+                player.sendSystemMessage(SudoOpMessages.forPlayer(player, "message.sudoop.expire_broadcast",
+                        record.playerName()).withStyle(ChatFormatting.YELLOW));
+            }
+            server.sendSystemMessage(SudoOpMessages.forPlayer(null, "message.sudoop.expire_broadcast",
+                    record.playerName()).withStyle(ChatFormatting.YELLOW));
         }
     }
 
@@ -633,36 +643,5 @@ public final class TemporaryOpManager {
             }
         }
         return false;
-    }
-
-    private static Component render(String template, String player, Integer minutes) {
-        String value = template.replace("{player}", player);
-        value = value.replace("{minutes}", minutes == null ? "" : String.valueOf(minutes));
-
-        MutableComponent result = Component.empty();
-        Style style = Style.EMPTY;
-        StringBuilder text = new StringBuilder();
-        for (int index = 0; index < value.length(); index++) {
-            char character = value.charAt(index);
-            if ((character == '&' || character == '\u00a7') && index + 1 < value.length()) {
-                ChatFormatting formatting = ChatFormatting.getByCode(Character.toLowerCase(value.charAt(index + 1)));
-                if (formatting != null) {
-                    appendStyledText(result, text, style);
-                    style = style.applyLegacyFormat(formatting);
-                    index++;
-                    continue;
-                }
-            }
-            text.append(character);
-        }
-        appendStyledText(result, text, style);
-        return result;
-    }
-
-    private static void appendStyledText(MutableComponent result, StringBuilder text, Style style) {
-        if (text.length() > 0) {
-            result.append(Component.literal(text.toString()).withStyle(style));
-            text.setLength(0);
-        }
     }
 }

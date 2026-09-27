@@ -33,18 +33,6 @@ public final class SudoOpConfig {
             .comment("Show the remaining temporary OP time in the player's action bar.")
             .define("actionBarEnabled", true);
 
-    public static final ModConfigSpec.ConfigValue<String> GRANT_BROADCAST_MESSAGE = BUILDER
-            .comment("Grant broadcast. Supports & color codes and {player}.")
-            .define("grantBroadcastMessage", "&a{player} 获取了临时OP");
-
-    public static final ModConfigSpec.ConfigValue<String> EXPIRE_BROADCAST_MESSAGE = BUILDER
-            .comment("Expiration broadcast. Supports & color codes and {player}.")
-            .define("expireBroadcastMessage", "&e{player} 的临时OP已结束");
-
-    public static final ModConfigSpec.ConfigValue<String> ACTION_BAR_MESSAGE = BUILDER
-            .comment("Action bar message. Supports & color codes, {player} and {minutes}.")
-            .define("actionBarMessage", "&b当前已获取临时OP，还剩 {minutes} 分钟");
-
     public static final ModConfigSpec SPEC = BUILDER.build();
 
     private SudoOpConfig() {
@@ -100,18 +88,6 @@ public final class SudoOpConfig {
 
     public static boolean actionBarEnabled() {
         return safe("actionBarEnabled", ACTION_BAR_ENABLED, true);
-    }
-
-    public static String grantBroadcastMessage() {
-        return safe("grantBroadcastMessage", GRANT_BROADCAST_MESSAGE, "&a{player} 获取了临时OP");
-    }
-
-    public static String expireBroadcastMessage() {
-        return safe("expireBroadcastMessage", EXPIRE_BROADCAST_MESSAGE, "&e{player} 的临时OP已结束");
-    }
-
-    public static String actionBarMessage() {
-        return safe("actionBarMessage", ACTION_BAR_MESSAGE, "&b当前已获取临时OP，还剩 {minutes} 分钟");
     }
 
     private static boolean isValidCommandName(Object value) {
